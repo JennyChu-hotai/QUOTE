@@ -120,12 +120,6 @@ def get_valid_warehouses(df_stock):
 
 # --- 5. 整合替代關係的庫存狀態與數量判定邏輯 ---
 def check_stock_status_and_qty_with_substitutes(target_p_no, df_stock, target_wh, part_to_root, sub_groups):
-    """
-    含替代件的庫存判定邏輯：
-    1. 找出 target_p_no 的所有替代件料號集合 (包含自己)
-    2. 加總這些料號在 target_wh 的庫存與全省合計庫存
-    3. 判定替代零件有庫存顯示 (商品別+零件編號 有庫存)
-    """
     if df_stock is None or df_stock.empty or not target_p_no:
         return "待確認 (無庫存表)", 0, ""
     
@@ -210,6 +204,15 @@ part_to_root, sub_groups = build_substitute_map(file_sub)
 st.subheader("🔍 第一步：輸入機型搜尋")
 model_input = st.text_input("請輸入機型編號 (例如: RHF30VAVLT):", "").strip()
 
+# 當輸入新機型時，檢測是否更換了機型
+if 'last_model_input' not in st.session_state:
+    st.session_state['last_model_input'] = model_input
+
+if model_input != st.session_state['last_model_input']:
+    # 更換機型時，自動清空舊的已勾選紀錄與報表文字狀態
+    st.session_state['selected_items'] = None
+    st.session_state['last_model_input'] = model_input
+
 if model_input:
     df_parts = load_data(file_parts)
     
@@ -259,13 +262,14 @@ if model_input:
                 if "選擇" not in search_results.columns:
                     search_results.insert(0, "選擇", False)
                 
-                with st.form(key="quote_selection_form"):
+                # 綁定與機型相關的 key，切換機型自動重置表單
+                with st.form(key=f"quote_selection_form_{model_input}"):
                     edited_df = st.data_editor(
                         search_results,
                         hide_index=True,
                         use_container_width=True,
                         disabled=[col for col in search_results.columns if col != "選擇"],
-                        key="part_editor"
+                        key=f"part_editor_{model_input}"
                     )
                     
                     confirm_btn = st.form_submit_button("確認選取並進入第三步")
@@ -274,7 +278,7 @@ if model_input:
                     st.session_state['selected_items'] = edited_df[edited_df["選擇"] == True]
 
                 # --- 9. 第三步：報價與庫存查詢 ---
-                if 'selected_items' in st.session_state and not st.session_state['selected_items'].empty:
+                if 'selected_items' in st.session_state and st.session_state['selected_items'] is not None and not st.session_state['selected_items'].empty:
                     selected_items = st.session_state['selected_items']
                     
                     st.divider()
@@ -352,16 +356,17 @@ if model_input:
                     quote_df = pd.DataFrame(quote_list)
                     st.dataframe(quote_df, use_container_width=True, hide_index=True)
                     
-                    # 2. 純文字報表區 (使用 st.text_area 解決鍵盤 Ctrl+C 快取問題 + 提供按鈕一鍵複製)
+                    # 2. 純文字報表區 (動態綁定 key 確保換機型或切換倉庫時立刻刷新內容)
                     st.markdown("### 📋 可複製純文字報表")
                     raw_copy_text = "\n".join(text_lines)
                     
-                    # 可直接在框內按 Ctrl+C 複製的文字區塊
-                    st.text_area("報價內文（點擊框內即可按 Ctrl+C 複製）：", value=raw_copy_text, height=180, key="report_textarea")
+                    # 💡 關鍵動態 Key: 確保換機型/倉庫時即時更新純文字框內容
+                    dynamic_area_key = f"report_text_{model_input}_{selected_wh}_{len(selected_items)}"
+                    st.text_area("報價內文（點選框內文字即可按 Ctrl+C 複製）：", value=raw_copy_text, height=180, key=dynamic_area_key)
                     
                     st.markdown(
-    '💡 說明：庫存數量已整合跨群組串聯之替代零件總數量。<span style="color:red; font-weight:bold;">非即時庫存!!</span>以打單時庫存量為準', 
-    unsafe_allow_html=True
-)
+                        '💡 說明：庫存數量已整合跨群組串聯之替代零件總數量。<span style="color:red; font-weight:bold;">非即時庫存!!</span>以打單時庫存量為準', 
+                        unsafe_allow_html=True
+                    )
                 elif confirm_btn:
                     st.warning("⚠️ 請至少勾選一項零件後再點擊『確認選取』。")
