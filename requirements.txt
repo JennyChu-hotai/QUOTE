@@ -1,3 +1,4 @@
-streamlit>=1.38.0
+streamlit
+starlette<0.38.0
 pandas
 openpyxl
